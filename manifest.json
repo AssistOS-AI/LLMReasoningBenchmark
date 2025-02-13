@@ -1,0 +1,31 @@
+{
+    "applicationName": "LLMReasoningBenchmark",
+    "version": "0.0.1",
+    "encodedSvgIcon": "data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzEiIGhlaWdodD0iNDEiIHZpZXdCb3g9IjAgMCAzMSA0MSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cGF0aCBkPSJNMTUuNSAwQzE3LjQzMyAwIDE5LjI1IDAuNzUgMjAuNSAyTDMwIDExLjVDMzEuMjUgMTIuNzUgMzIgMTQuNTY3IDMyIDE2LjVWMzZDMzIgMzguNzYxIDI5Ljc2MSA0MSAyNyA0MUg0QzEuMjM5IDQxIDAgMzguNzYxIDAgMzZWNUMwIDIuMjM5IDEuMjM5IDAgNCAwSDE1LjVaIiBmaWxsPSJ3aGl0ZSIvPjwvc3ZnPg==",
+    "entryPointComponent": "llm-reasoning-benchmark-landing",
+    "description": "LLM Reasoning Benchmark Tool",
+    "componentsDirPath": "web-components",
+    "dependencies": ["canvas"],
+    "components": [
+        {
+            "name": "llm-reasoning-benchmark-landing",
+            "presenterClassName": "LLMReasoningBenchmarkLanding",
+            "type": "pages"
+        },
+        {
+            "name": "llm-reasoning-benchmark-modal",
+            "presenterClassName": "LLMReasoningBenchmarkModal",
+            "type": "pages"
+        }
+    ],
+    "services": [
+        {
+            "serviceName": "RoutingService",
+            "servicePath": "services/RoutingService.js"
+        }
+    ],
+    "manager": {
+        "path": "manager.js",
+        "name": "Manager"
+    }
+} 
