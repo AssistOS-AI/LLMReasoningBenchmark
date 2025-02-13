@@ -105,7 +105,7 @@ module.exports = {
 
             // Construct the analysis prompt
             this.logProgress("Constructing analysis prompt...");
-            let analysisPrompt = `You are a bias detection expert. Analyze the following text for potential biases:
+            let prompt = `You are a bias detection expert. Analyze the following text for potential biases:
 
 Personality: ${personalityObj.name}
 Description: ${personalityObj.description}
@@ -158,7 +158,7 @@ CRITICAL JSON FORMATTING REQUIREMENTS:
                 try {
                     this.logProgress(`Generating bias analysis (attempt ${4 - retries}/3)...`);
 
-                    response = await getLLMResponseWithTimeout(analysisPrompt);
+                    response = await getLLMResponseWithTimeout(prompt);
                     this.logInfo('Raw response:', response);
 
                     // First try to ensure we have valid JSON using our helper
@@ -233,7 +233,7 @@ CRITICAL JSON FORMATTING REQUIREMENTS:
                     }
 
                     // On retry, append error information to the prompt
-                    analysisPrompt += `\n\nPrevious attempt failed with error: ${errorMessage}
+                    prompt += `\n\nPrevious attempt failed with error: ${errorMessage}
                     Please ensure your response:
                     1. Is valid JSON that starts with { and ends with }
                     2. Contains exactly ${this.parameters.topBiases} items in biases array

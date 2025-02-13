@@ -1,4 +1,4 @@
-const LLM_REASONING_BENCHMARK = "llm-reasoning-benchmark";
+const LLM_REASONING_BENCHMARK = "llm-reasoning-benchmark-landing";
 
 export class RoutingService {
     constructor() {

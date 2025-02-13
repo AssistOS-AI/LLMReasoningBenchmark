@@ -1,8 +1,9 @@
 const applicationModule = require('assistos').loadModule('application', {});
 const personalityModule = require('assistos').loadModule('personality', {});
 const documentModule = require('assistos').loadModule('document', {});
+import {generateProblemDescription, generateRandomConfig, solveProblem} from "../../libs/starship-transport-generator.js";
 
-export class LlmReasoningBenchmarkModal {
+export class LLMReasoningBenchmarkModal {
     constructor(element, invalidate) {
         this.element = element;
         this.invalidate = invalidate;
@@ -39,7 +40,6 @@ export class LlmReasoningBenchmarkModal {
 
     async afterRender() {
         this.setupEventListeners();
-        this.setupSourceToggle();
         document.addEventListener('themechange', this.handleThemeChange.bind(this));
     }
 
@@ -47,42 +47,8 @@ export class LlmReasoningBenchmarkModal {
         await assistOS.UI.closeModal(_target, taskId);
     }
 
-    setupSourceToggle() {
-        const sourceOptions = this.element.querySelectorAll('.source-option');
-        const sourceContents = this.element.querySelectorAll('.source-content');
-        const textInput = this.element.querySelector('textarea[name="text"]');
-        const documentSelect = this.element.querySelector('select[name="document"]');
-
-        sourceOptions.forEach(option => {
-            option.addEventListener('click', () => {
-                sourceOptions.forEach(opt => opt.classList.remove('active'));
-                option.classList.add('active');
-
-                sourceContents.forEach(content => content.style.display = 'none');
-                const isEnterText = option.textContent.includes('Enter Text');
-                sourceContents[isEnterText ? 0 : 1].style.display = 'block';
-
-                textInput.required = isEnterText;
-                textInput.disabled = !isEnterText;
-                documentSelect.required = !isEnterText;
-                documentSelect.disabled = isEnterText;
-            });
-        });
-
-        documentSelect.addEventListener('change', async (e) => {
-            const documentId = e.target.value;
-            if (documentId) {
-                try {
-                    await documentModule.getDocument(assistOS.space.id, documentId);
-                } catch (error) {
-                    console.error('Error loading document:', error);
-                }
-            }
-        });
-    }
-
     setupEventListeners() {
-        const form = this.element.querySelector('#biasForm');
+        const form = this.element.querySelector('#llmBenchmarkForm');
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             await this.handleAnalysis(form);
@@ -124,25 +90,13 @@ export class LlmReasoningBenchmarkModal {
                     return assistOS.UI.showApplicationError("Invalid form data", "Please fill all the required fields", "error");
                 }
 
-                const { personality, prompt, text, document: documentId, topBiases } = formData.data;
-                console.log('Extracted data:', { personality, prompt, text, documentId, topBiases });
-
-                let analysisData = {
-                    personality,
-                    prompt,
-                    topBiases,
-                    text: text
-                };
-
-                if (!text) {
-                    console.log('Getting document content...');
-                    const document = await documentModule.getDocument(assistOS.space.id, documentId);
-                    analysisData.text = await this.extractDocumentContent(document);
-                    if (!analysisData.text) {
-                        throw new Error('Could not extract text from document');
-                    }
-                }
-
+                const { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId } = formData.data;
+                console.log('Extracted data:', { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId });
+                const config = generateRandomConfig(speciesCount, relationshipsCount, starshipCapacity);
+                const prompt = generateProblemDescription(config);
+                let analysisData = { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, prompt, config };
+                const solution = await solveProblem(config);
+                console.log('Solution:', solution);
                 console.log('Running application task with data:', analysisData);
                 const taskId = await applicationModule.runApplicationTask(
                     assistOS.space.id,

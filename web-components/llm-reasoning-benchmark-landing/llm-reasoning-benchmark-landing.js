@@ -3,7 +3,7 @@ import {RoutingService} from "../../services/RoutingService.js";
 const personalityModule = require('assistos').loadModule('personality', {});
 const documentModule = require('assistos').loadModule('document', {});
 const LLM_REASONING_BENCHMARK_PREFIX = 'llm_reasoning_benchmark_';
-export class LlmReasoningBenchmarkLanding {
+export class LLMReasoningBenchmarkLanding {
     constructor(element, invalidate) {
         this.element = element;
         this.invalidate = invalidate;
@@ -142,7 +142,7 @@ export class LlmReasoningBenchmarkLanding {
         return _target.getAttribute('data-id');
     }
 
-    async openBiasDetectorModal() {
+    async openLLMReasoningBenchmarkModal() {
         const taskId = await assistOS.UI.showModal("llm-reasoning-benchmark-modal", {
             "presenter": "llm-reasoning-benchmark-modal"
         }, true);
