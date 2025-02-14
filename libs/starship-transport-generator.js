@@ -80,7 +80,7 @@ function generateAllowedMoves(n, capacity) {
  *   move(MoveList, state(OldCounts,OldSide), state(NewCounts,NewSide))
  * so we can reconstruct the crossing details in JavaScript.
  */
-function generatePrologCode(config) {
+export function generatePrologCode(config) {
     const species = config.species;
     const relationships = config.relationships || [];
     const starshipCapacity = config.starshipCapacity || 2;
@@ -192,6 +192,24 @@ solve_solution(Solution) :-
     path(Initial, [Initial], Solution).
 `;
 
+    const checkSolutionPredicates = `
+% check_solution(+Steps, +CurrentState)
+% Steps is a list of step(MoveList, Direction).
+% Direction is either leftToRight or rightToLeft.
+% It succeeds iff we can apply all steps in order and end in final_state.
+
+check_solution([], State) :-
+    final_state(State).   % All steps used up, must be at final_state
+
+check_solution([step(Move, leftToRight)|Rest], state(Counts, start)) :-
+    transition_with_move(state(Counts, start), Move, state(NewCounts, target)),
+    check_solution(Rest, state(NewCounts, target)).
+
+check_solution([step(Move, rightToLeft)|Rest], state(Counts, target)) :-
+    transition_with_move(state(Counts, target), Move, state(NewCounts, start)),
+    check_solution(Rest, state(NewCounts, start)).
+`;
+
     // Concatenate it all
     return [
         movesCode,
@@ -202,6 +220,7 @@ solve_solution(Solution) :-
         basePredicates,
         transitionRules,
         pathPredicates,
+        checkSolutionPredicates
     ].join("\n\n");
 }
 
@@ -393,4 +412,105 @@ export async function solveProblem(config) {
         console.error("Error solving problem:", error);
         throw error;
     }
+}
+
+export async function checkUserSolution(prologProgram, config, solutionLines) {
+    const stepsArray = parseSolutionLines(config, solutionLines);
+    const stepsPrologList = "[" + stepsArray.map(stepToPrologTerm).join(",") + "]";
+    const session = pl.create();
+
+    await new Promise((resolve, reject) => {
+        session.consult(prologProgram, {
+            success: resolve,
+            error: (err) => reject(new Error("Consult error: " + err)),
+        });
+    });
+
+    const query = `
+        initial_state(Init),
+        check_solution(${stepsPrologList}, Init).
+    `;
+
+    let isValid = false;
+    await new Promise((resolve, reject) => {
+        session.query(query, {
+            success: () => getAnswer(),
+            error: (err) => reject(new Error("Query error: " + err)),
+        });
+
+        function getAnswer() {
+            session.answer({
+                success: function(answer) {
+                    if (answer === false) {
+                        resolve();
+                    } else {
+                        isValid = true;
+                        resolve();
+                    }
+                },
+                fail: function() {
+                    resolve();
+                },
+                error: function(err) {
+                    reject(new Error("Answer error: " + err));
+                }
+            });
+        }
+    });
+
+    return isValid;
+}
+
+function parseSolutionLines(config, solutionLines) {
+    const speciesNames = config.species.map((s) => s.name);
+    const steps = [];
+
+    for (const line of solutionLines) {
+        const [leftPart, rightPart] = line.split(" cross ");
+        if (!rightPart) {
+            throw new Error(`Invalid line (missing ' cross '): ${line}`);
+        }
+
+        const directionStr = rightPart.trim();
+        let direction;
+        if (directionStr === "left -> right") {
+            direction = "leftToRight";
+        } else if (directionStr === "right -> left") {
+            direction = "rightToLeft";
+        } else {
+            throw new Error(`Invalid direction segment in line: ${line}`);
+        }
+
+        const segments = leftPart.split(",");
+        const amounts = new Array(speciesNames.length).fill(0);
+
+        for (const segRaw of segments) {
+            const seg = segRaw.trim();
+            const match = seg.match(/^(\d+)\s+(\S+)$/);
+            if (!match) {
+                throw new Error(`Cannot parse segment "${seg}" in line: ${line}`);
+            }
+            const count = parseInt(match[1], 10);
+            const spName = match[2];
+            const idx = speciesNames.indexOf(spName);
+            if (idx < 0) {
+                throw new Error(`Unknown species "${spName}" in line: ${line}`);
+            }
+            amounts[idx] += count;
+        }
+
+        steps.push({ amounts, direction });
+    }
+
+    return steps;
+}
+
+/**
+ * Convert one step object like { amounts: [2,0], direction: 'leftToRight' }
+ * into a Prolog term string: step([2,0],leftToRight)
+ */
+function stepToPrologTerm(stepObj) {
+    const { amounts, direction } = stepObj;
+    const arrayStr = `[${amounts.join(",")}]`;
+    return `step(${arrayStr},${direction})`;
 }

@@ -1,7 +1,14 @@
 const applicationModule = require('assistos').loadModule('application', {});
 const personalityModule = require('assistos').loadModule('personality', {});
 const documentModule = require('assistos').loadModule('document', {});
-import {generateProblemDescription, generateRandomConfig, solveProblem} from "../../libs/starship-transport-generator.js";
+
+import {
+    generateProblemDescription,
+    generateRandomConfig,
+    solveProblem,
+    checkUserSolution,
+    generatePrologCode
+} from "../../libs/starship-transport-generator.js";
 
 export class LLMReasoningBenchmarkModal {
     constructor(element, invalidate) {
@@ -93,10 +100,9 @@ export class LLMReasoningBenchmarkModal {
                 const { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId } = formData.data;
                 console.log('Extracted data:', { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId });
                 const config = generateRandomConfig(speciesCount, relationshipsCount, starshipCapacity);
+                const prologProgram = generatePrologCode(config);
                 const prompt = generateProblemDescription(config);
                 let analysisData = { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, prompt, config };
-                const solution = await solveProblem(config);
-                console.log('Solution:', solution);
                 console.log('Running application task with data:', analysisData);
                 const taskId = await applicationModule.runApplicationTask(
                     assistOS.space.id,
