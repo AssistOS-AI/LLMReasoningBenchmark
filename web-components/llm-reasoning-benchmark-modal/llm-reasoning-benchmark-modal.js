@@ -1,11 +1,9 @@
 const applicationModule = require('assistos').loadModule('application', {});
 const personalityModule = require('assistos').loadModule('personality', {});
 const documentModule = require('assistos').loadModule('document', {});
-
 import {
     generateProblemDescription,
     generateRandomConfig,
-    solveProblem,
     checkUserSolution,
     generatePrologCode
 } from "../../libs/starship-transport-generator.js";
@@ -84,6 +82,47 @@ export class LLMReasoningBenchmarkModal {
         return '';
     }
 
+    async logTaskStatus(taskStatus) {
+        console.log('Task status:', taskStatus);
+        if (taskStatus === 'completed') {
+            const documents = await documentModule.getDocumentsMetadata(assistOS.space.id);
+            this.documentId = documents[documents.length - 1].id;
+            const document = await documentModule.getDocument(assistOS.space.id, this.documentId);
+            console.log('Document items:', document);
+            console.log(this.prologProgram);
+            let solutionIsValid = false;
+            try {
+                console.log(JSON.stringify(this.config, null, 2));
+                let solution = document.chapters[1].paragraphs[0].text;
+                console.log('Solution:', solution);
+                solution = JSON.parse(solution);
+                solutionIsValid = await checkUserSolution(this.prologProgram, this.config, solution);
+            } catch (e) {
+                console.error('Error checking solution:', e);
+                solutionIsValid = false;
+            }
+            console.log('Solution is valid:', solutionIsValid);
+            let chapterData = {
+                title: `Solution validation:`
+            };
+
+            let chapterId = await documentModule.addChapter(assistOS.space.id, this.documentId, chapterData);
+            let paragraphObj = {};
+            if (solutionIsValid) {
+                paragraphObj = {
+                    text: `The solution provided is correct.`
+                };
+            } else {
+                paragraphObj = {
+                    text: `The solution provided is incorrect.`
+                };
+            }
+
+            await documentModule.addParagraph(assistOS.space.id, this.documentId, chapterId, paragraphObj);
+            this.invalidate();
+        }
+    }
+
     async handleAnalysis(form) {
         try {
             console.log('Starting analysis...');
@@ -97,22 +136,47 @@ export class LLMReasoningBenchmarkModal {
                     return assistOS.UI.showApplicationError("Invalid form data", "Please fill all the required fields", "error");
                 }
 
-                const { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId } = formData.data;
-                console.log('Extracted data:', { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, document: documentId });
-                const config = generateRandomConfig(speciesCount, relationshipsCount, starshipCapacity);
-                const prologProgram = generatePrologCode(config);
-                const prompt = generateProblemDescription(config);
-                let analysisData = { personality, speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity, prompt, config };
+                let {
+                    personality,
+                    speciesCount,
+                    individualsPerSpecies,
+                    relationshipsCount,
+                    starshipCapacity,
+                    document: documentId
+                } = formData.data;
+                console.log('Extracted data:', {
+                    personality,
+                    speciesCount,
+                    individualsPerSpecies,
+                    relationshipsCount,
+                    starshipCapacity,
+                    document: documentId
+                });
+                speciesCount = parseInt(speciesCount);
+                individualsPerSpecies = parseInt(individualsPerSpecies);
+                relationshipsCount = parseInt(relationshipsCount);
+                this.config = generateRandomConfig(speciesCount, individualsPerSpecies, relationshipsCount, starshipCapacity);
+                this.prologProgram = generatePrologCode(this.config);
+                const prompt = generateProblemDescription(this.config);
+                let analysisData = {
+                    personality,
+                    speciesCount,
+                    individualsPerSpecies,
+                    relationshipsCount,
+                    starshipCapacity,
+                    prompt,
+                    config: this.config
+                };
                 console.log('Running application task with data:', analysisData);
-                const taskId = await applicationModule.runApplicationTask(
+                this.taskId = await applicationModule.runApplicationTask(
                     assistOS.space.id,
                     "LLMReasoningBenchmark",
                     "SolveReasoningProblem",
                     analysisData
                 );
-                console.log('Task created with ID:', taskId);
-
-                await assistOS.UI.closeModal(this.element, taskId);
+                await assistOS.NotificationRouter.subscribeToSpace(assistOS.space.id, this.taskId, this.logTaskStatus.bind(this));
+                console.log('Task created with ID:', this.taskId);
+                await assistOS.UI.closeModal(this.element, this.taskId);
             });
         } catch (error) {
             console.error('Error in handleAnalysis:', error);

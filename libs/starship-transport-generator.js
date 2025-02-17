@@ -465,7 +465,13 @@ function parseSolutionLines(config, solutionLines) {
     const speciesNames = config.species.map((s) => s.name);
     const steps = [];
 
-    for (const line of solutionLines) {
+    for (let line of solutionLines) {
+        const match = line.match(/^(.*?\b(?:left -> right|right -> left))/);
+        if (!match) {
+            throw new Error(`Missing direction "left -> right" or "right -> left" in line: ${line}`);
+        }
+        line = match[1].trim();
+
         const [leftPart, rightPart] = line.split(" cross ");
         if (!rightPart) {
             throw new Error(`Invalid line (missing ' cross '): ${line}`);
@@ -486,12 +492,12 @@ function parseSolutionLines(config, solutionLines) {
 
         for (const segRaw of segments) {
             const seg = segRaw.trim();
-            const match = seg.match(/^(\d+)\s+(\S+)$/);
-            if (!match) {
+            const matchSeg = seg.match(/^(\d+)\s+(\S+)$/);
+            if (!matchSeg) {
                 throw new Error(`Cannot parse segment "${seg}" in line: ${line}`);
             }
-            const count = parseInt(match[1], 10);
-            const spName = match[2];
+            const count = parseInt(matchSeg[1], 10);
+            const spName = matchSeg[2];
             const idx = speciesNames.indexOf(spName);
             if (idx < 0) {
                 throw new Error(`Unknown species "${spName}" in line: ${line}`);

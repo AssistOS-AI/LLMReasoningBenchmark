@@ -168,7 +168,7 @@ module.exports = {
             });
 
             chapterData = {
-                title: `Starship solution:`
+                title: `Solution:`
             };
 
             chapterId = await documentModule.addChapter(this.spaceId, documentId, chapterData);
@@ -185,7 +185,7 @@ module.exports = {
             });
             this.logSuccess("Successfully added all chapters and paragraphs");
             this.logSuccess(`Analysis saved as document with ID: ${documentId}`);
-
+            this.logInfo(`Solution: ${response.message}`);
             return {
                 status: 'completed',
                 result: response.message,
