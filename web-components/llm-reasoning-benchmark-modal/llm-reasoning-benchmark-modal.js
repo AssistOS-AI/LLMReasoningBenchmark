@@ -165,7 +165,8 @@ export class LLMReasoningBenchmarkModal {
                     relationshipsCount,
                     starshipCapacity,
                     prompt,
-                    config: this.config
+                    config: this.config,
+                    agentId: assistOS.agent.agentData.id
                 };
                 console.log('Running application task with data:', analysisData);
                 this.taskId = await applicationModule.runApplicationTask(
