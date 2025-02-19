@@ -231,7 +231,7 @@ check_solution([step(Move, rightToLeft)|Rest], state(Counts, target)) :-
 export function generateProblemDescription(config) {
     const starshipCapacity = config.starshipCapacity || 2;
     let problemDescription = "Solve the following transport puzzle:\n\n";
-    problemDescription += `A shuttle with capacity ${starshipCapacity} must transport a group of species from the start to the target bank.\n`;
+    problemDescription += `A shuttle with capacity ${starshipCapacity} must transport a group of species from the left to the right bank.\n`;
     config.species.forEach((s) =>
         problemDescription += `  - ${s.name}: ${s.count} individual(s)\n`
     );
@@ -251,7 +251,7 @@ export function generateProblemDescription(config) {
         3. Use double quotes for all strings
         4. Do not include any text, comments, or explanations outside the array structure
         5. Follow this exact structure:
-        ["n1 speciesName1, n2 speciesName2 cross left -> right", ...]`;
+        ["n1 speciesName1, n2 speciesName2 cross left to right", "n3 speciesName3, n4 speciesName4 cross right to left", ...]`;
 
     return problemDescription;
 }
@@ -265,9 +265,9 @@ function sideToText(sideAtom) {
 
 /**
  * Convert a single "move(MoveList, state(OldCounts,OldSide), state(NewCounts,NewSide))"
- * into a textual description like "2 zargons cross left -> right".
+ * into a textual description like "2 zargons cross left to right".
  *
- * If multiple species are moved, it might say "2 zargons, 1 martian cross left -> right".
+ * If multiple species are moved, it might say "2 zargons, 1 martian cross left to right".
  */
 function moveToSentence(moveTerm, species) {
     // The moveTerm structure in Tau Prolog's internal representation:
@@ -285,7 +285,7 @@ function moveToSentence(moveTerm, species) {
     const oldSideAtom = oldState.args[1];
     const newSideAtom = newState.args[1];
 
-    const direction = sideToText(oldSideAtom) + " -> " + sideToText(newSideAtom);
+    const direction = sideToText(oldSideAtom) + " to " + sideToText(newSideAtom);
 
     // Convert Prolog list of integers to a JS array
     const amounts = prologListToArray(moveList);
@@ -328,8 +328,8 @@ function prologListToArray(listTerm) {
  * Convert an entire Prolog solution (which is a list of move(...) terms)
  * into an array of human-readable steps:
  *   [
- *     "2 zargons cross left -> right",
- *     "1 warg crosses right -> left",
+ *     "2 zargons cross left to right",
+ *     "1 warg crosses right to left",
  *     ...
  *   ]
  */
@@ -417,6 +417,9 @@ export async function solveProblem(config) {
 export async function checkUserSolution(prologProgram, config, solutionLines) {
     const stepsArray = parseSolutionLines(config, solutionLines);
     const stepsPrologList = "[" + stepsArray.map(stepToPrologTerm).join(",") + "]";
+    console.log("====================================================================================================")
+    console.log(stepsPrologList)
+    console.log("====================================================================================================")
     const session = pl.create();
 
     await new Promise((resolve, reject) => {
@@ -466,9 +469,9 @@ function parseSolutionLines(config, solutionLines) {
     const steps = [];
 
     for (let line of solutionLines) {
-        const match = line.match(/^(.*?\b(?:left -> right|right -> left))/);
+        const match = line.match(/^(.*?\b(?:left to right|right to left))/);
         if (!match) {
-            throw new Error(`Missing direction "left -> right" or "right -> left" in line: ${line}`);
+            throw new Error(`Missing direction "left to right" or "right to left" in line: ${line}`);
         }
         line = match[1].trim();
 
@@ -479,9 +482,9 @@ function parseSolutionLines(config, solutionLines) {
 
         const directionStr = rightPart.trim();
         let direction;
-        if (directionStr === "left -> right") {
+        if (directionStr === "left to right") {
             direction = "leftToRight";
-        } else if (directionStr === "right -> left") {
+        } else if (directionStr === "right to left") {
             direction = "rightToLeft";
         } else {
             throw new Error(`Invalid direction segment in line: ${line}`);

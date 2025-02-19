@@ -8,6 +8,8 @@ import {
     generatePrologCode
 } from "../../libs/starship-transport-generator.js";
 
+const LLM_REASONING_DOCUMENT_TITLE = 'llm_reasoning_document';
+
 export class LLMReasoningBenchmarkModal {
     constructor(element, invalidate) {
         this.element = element;
@@ -82,31 +84,46 @@ export class LLMReasoningBenchmarkModal {
         return '';
     }
 
+    extractArrayFromString(str) {
+        // Regular expression to find the array.
+        const regex = /\[\s*("[^"]*"(?:\s*,\s*"[^"]*")*)\s*\]/;
+
+        const match = str.match(regex);
+
+        if (match && match[1]) {
+            // Construct a valid JSON string.
+            const jsonString = `[${match[1]}]`;
+            const array = JSON.parse(jsonString);
+            return array;
+        } else {
+            throw new Error("No array found in the string.");
+        }
+    }
+
     async logTaskStatus(taskStatus) {
         console.log('Task status:', taskStatus);
         if (taskStatus === 'completed') {
             const documents = await documentModule.getDocumentsMetadata(assistOS.space.id);
-            this.documentId = documents[documents.length - 1].id;
+            this.documentId = documents.find(doc => doc.title === LLM_REASONING_DOCUMENT_TITLE).id;
             const document = await documentModule.getDocument(assistOS.space.id, this.documentId);
             console.log('Document items:', document);
             console.log(this.prologProgram);
             let solutionIsValid = false;
+            console.log(JSON.stringify(this.config, null, 2));
+            let lastChapter = document.chapters[document.chapters.length - 1];
+            const lastParagraph = lastChapter.paragraphs[lastChapter.paragraphs.length - 1];
             try {
-                console.log(JSON.stringify(this.config, null, 2));
-                let solution = document.chapters[1].paragraphs[0].text;
-                console.log('Solution:', solution);
-                solution = JSON.parse(solution);
+                let solution = lastParagraph.text;
+                console.log('Solution before:', solution);
+                // extract from solution only the json object of the solution which is inside []
+                solution = this.extractArrayFromString(solution);
+                console.log('Solution after:', solution);
                 solutionIsValid = await checkUserSolution(this.prologProgram, this.config, solution);
             } catch (e) {
                 console.error('Error checking solution:', e);
                 solutionIsValid = false;
             }
             console.log('Solution is valid:', solutionIsValid);
-            let chapterData = {
-                title: `Solution validation:`
-            };
-
-            let chapterId = await documentModule.addChapter(assistOS.space.id, this.documentId, chapterData);
             let paragraphObj = {};
             if (solutionIsValid) {
                 paragraphObj = {
@@ -118,7 +135,7 @@ export class LLMReasoningBenchmarkModal {
                 };
             }
 
-            await documentModule.addParagraph(assistOS.space.id, this.documentId, chapterId, paragraphObj);
+            await documentModule.addParagraph(assistOS.space.id, this.documentId, lastChapter.id, paragraphObj);
             this.invalidate();
         }
     }

@@ -1,4 +1,4 @@
-const LLM_REASONING_BENCHMARK_PREFIX = 'llm_reasoning_benchmark_';
+const LLM_REASONING_DOCUMENT_TITLE = 'llm_reasoning_document';
 const TASK_TYPE = "LLMReasoningBenchmark";
 module.exports = {
     runTask: async function () {
@@ -36,56 +36,71 @@ module.exports = {
 
             // Save analysis as a document
             this.logProgress("Saving analysis results...");
+            // check if document already exists
+            const documents = await documentModule.getDocumentsMetadata(this.spaceId);
+            const existingDocument = documents.find(doc => doc.title === LLM_REASONING_DOCUMENT_TITLE);
+            let documentId;
+            if(!existingDocument) {
+                const documentObj = {
+                    title: LLM_REASONING_DOCUMENT_TITLE,
+                    type: TASK_TYPE,
+                    content: "",
+                    abstract: JSON.stringify({
+                        personality: personalityObj.name,
+                        timestamp: new Date().toISOString()
+                    }, null, 2),
+                    metadata: {
+                        id: null,  // This will be filled by the system
+                        title: LLM_REASONING_DOCUMENT_TITLE
+                    }
+                };
 
-            const documentObj = {
-                title: `${LLM_REASONING_BENCHMARK_PREFIX}${new Date().toISOString()}`,
-                type: TASK_TYPE,
-                content: "",
-                abstract: JSON.stringify({
-                    personality: personalityObj.name,
-                    timestamp: new Date().toISOString()
-                }, null, 2),
-                metadata: {
-                    id: null,  // This will be filled by the system
-                    title: `${LLM_REASONING_BENCHMARK_PREFIX}}${new Date().toISOString()}`
-                }
-            };
-
-            const documentId = await documentModule.addDocument(this.spaceId, documentObj);
+                documentId = await documentModule.addDocument(this.spaceId, documentObj);
+            } else {
+                documentId = existingDocument.id;
+            }
 
             this.logProgress("Adding chapters and paragraphs...");
             const chapterIds = [];
 
             let chapterData = {
-                title: `Starship transport problem:`
+                title: new Date().toISOString()
             };
 
             let chapterId = await documentModule.addChapter(this.spaceId, documentId, chapterData);
             chapterIds.push(chapterId);
-            this.logInfo(`Added chapter for problem`, {
+            this.logInfo(`Added chapter for current run`, {
                 documentId: documentId,
                 chapterId: chapterId
             });
 
-            // Add explanation as paragraph
             let paragraphObj = {
-                text: prompt,
+                text: personalityObj.llms.text
             };
 
             let paragraphId = await documentModule.addParagraph(this.spaceId, documentId, chapterId, paragraphObj);
-            this.logInfo(`Added paragraph for solution`, {
+            this.logInfo(`Added paragraph for model name`, {
                 documentId: documentId,
                 chapterId: chapterId,
                 paragraphId: paragraphId
             });
 
-            chapterData = {
-                title: `Solution:`
+            paragraphObj = {
+                text: prompt
             };
 
-            chapterId = await documentModule.addChapter(this.spaceId, documentId, chapterData);
+            paragraphId = await documentModule.addParagraph(this.spaceId, documentId, chapterId, paragraphObj);
+            this.logInfo(`Added paragraph for problem statement`, {
+                documentId: documentId,
+                chapterId: chapterId,
+                paragraphId: paragraphId
+            });
 
-            this.logInfo(`Added chapter for solution`);
+            paragraphObj = {
+                text: "Solution"
+            };
+            paragraphId = await documentModule.addParagraph(this.spaceId, documentId, chapterId, paragraphObj);
+
             paragraphObj = {};
             paragraphId = await documentModule.addParagraph(this.spaceId, documentId, chapterId, paragraphObj);
             const config = {
