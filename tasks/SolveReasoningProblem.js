@@ -14,16 +14,13 @@ module.exports = {
             this.logProgress("Fetching personality details...");
             this.logInfo(`Parameters received: ${JSON.stringify(this.parameters)}`);
 
-            const personality = await personalityModule.getPersonality(this.spaceId, this.parameters.personality);
-            if (!personality) {
+            const personalityObj = await personalityModule.getPersonality(this.spaceId, this.parameters.personality);
+            if (!personalityObj) {
                 this.logError("Personality not found by ID");
                 throw new Error('Personality not found by ID');
             }
 
-            this.logInfo(`Found personality name: ${personality.name}`);
-            const personalityObj = await personalityModule.getPersonalityByName(this.spaceId, personality.name);
-            this.logInfo(`Personality object received: ${JSON.stringify(personalityObj)}`);
-
+            this.logInfo(`Found personality name: ${personalityObj.name}`);
             if (!personalityObj) {
                 this.logError("Personality not found by name");
                 throw new Error('Personality not found by name');
@@ -125,6 +122,7 @@ module.exports = {
             };
 
         } catch (error) {
+            console.error(error);
             this.logError(`Error solving transport problem: ${error.message}`);
             throw error;
         }
