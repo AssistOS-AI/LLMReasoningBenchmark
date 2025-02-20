@@ -21,17 +21,35 @@ export function generateRandomConfig(numSpecies, numIndividualsPerSpecies, numRe
     // Build relationships
     const relationships = [];
     const usedPairs = new Set();
+    const reciprocalPairs = new Set(); // Track reciprocal relationships
     let attempts = 0;
+
     while (relationships.length < numRelationships && attempts < 1000) {
         attempts++;
         const predIdx = Math.floor(Math.random() * numSpecies);
         let preyIdx = Math.floor(Math.random() * numSpecies);
+
+        // Skip if same species
         while (preyIdx === predIdx) {
             preyIdx = Math.floor(Math.random() * numSpecies);
         }
+
         const key = `${predIdx}-${preyIdx}`;
-        if (!usedPairs.has(key)) {
+        const reciprocalKey = `${preyIdx}-${predIdx}`;
+
+        // Check if this pair or its reciprocal has been used
+        if (!usedPairs.has(key) && !reciprocalPairs.has(key)) {
+            // For relationships > 1, check for reciprocal relationships
+            if (relationships.length >= 1) {
+                // If the reciprocal relationship exists, skip this pair
+                if (usedPairs.has(reciprocalKey)) {
+                    continue;
+                }
+            }
+
             usedPairs.add(key);
+            reciprocalPairs.add(reciprocalKey);
+
             relationships.push({
                 predator: species[predIdx].name,
                 prey: species[preyIdx].name,
@@ -46,7 +64,6 @@ export function generateRandomConfig(numSpecies, numIndividualsPerSpecies, numRe
         starshipCapacity
     };
 }
-
 /**
  * Generates all allowed "moves" for a starship carrying up to `capacity`
  * across `n` species.
