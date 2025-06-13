@@ -39,7 +39,7 @@ class SolutionVerifier:
     
     def parseSolutionStep(self, stepText: str) -> Tuple[Dict[str, int], str]:
         """
-        Parse a solution step in format: "move 1 x 2 y left -> right"
+        Parse a solution step in format: "move 1 x 2 y start -> target" or "move empty start -> target"
         Returns tuple of (species moves dict, direction)
         direction is either 'leftToRight' or 'rightToLeft'
         """
@@ -47,14 +47,18 @@ class SolutionVerifier:
         
         # Determine direction
         direction = 'leftToRight'  # default
-        if re.search(r'right\s*->\s*left|right\s+to\s+left|to\s+start', stepText):
+        if re.search(r'right\s*->\s*left|right\s+to\s+left|to\s+start|target\s*->\s*start', stepText):
             direction = 'rightToLeft'
         
         # Remove "move" and direction indicators (support both old and new formats)
         stepText = re.sub(r'^move\s+', '', stepText)
-        stepText = re.sub(r'\s+(left\s*->\s*right|left\s+to\s+right|right\s*->\s*left|right\s+to\s+left|to\s+target|to\s+start).*$', '', stepText)
+        stepText = re.sub(r'\s+(left\s*->\s*right|left\s+to\s+right|right\s*->\s*left|right\s+to\s+left|to\s+target|to\s+start|start\s*->\s*target|target\s*->\s*start).*$', '', stepText)
         
         moves = {}
+        
+        # Check for empty move
+        if re.search(r'\bempty\b', stepText):
+            return moves, direction  # Return empty dict for empty moves
         
         # Find all patterns like "1 x", "2 y", "3 species_name" or "1x", "2y" (backward compatibility)
         movePattern = r'(\d+)\s*([a-zA-Z_]+)'
@@ -133,15 +137,18 @@ class SolutionVerifier:
             
             # Verify each step
             for stepNum, (moves, direction) in enumerate(solutionSteps, 1):
-                print(f"\nStep {stepNum}: {moves} ({direction})")
+                # Check if this is an empty move
+                totalMoves = sum(moves.values())
+                isEmptyMove = totalMoves == 0
+                
+                if isEmptyMove:
+                    print(f"\nStep {stepNum}: empty move ({direction})")
+                else:
+                    print(f"\nStep {stepNum}: {moves} ({direction})")
                 
                 # Check capacity constraint
-                totalMoves = sum(moves.values())
                 if totalMoves > capacity:
                     return False, f"Step {stepNum}: Capacity violation - moving {totalMoves} individuals, capacity is {capacity}"
-                
-                if totalMoves == 0:
-                    return False, f"Step {stepNum}: No moves specified"
                 
                 # Determine source and destination banks based on direction
                 if direction == 'leftToRight':
@@ -182,8 +189,34 @@ class SolutionVerifier:
                         # Check target bank safety  
                         if targetBank[protected] > 0 and targetBank[protected] < targetBank[threatening]:
                             return False, f"Step {stepNum}: Safety violation on target bank - {protected} ({targetBank[protected]}) outnumbered by {threatening} ({targetBank[threatening]})"
+                    
+                    elif constraint['type'] == 'group_not_outnumbered':
+                        protectedGroup = constraint['protected_group']
+                        threateningGroup = constraint['threatening_group']
+                        
+                        # Check if any protected species are present on start bank
+                        startProtectedCount = sum(startBank.get(species, 0) for species in protectedGroup)
+                        startThreateningCount = sum(startBank.get(species, 0) for species in threateningGroup)
+                        
+                        if startProtectedCount > 0 and startProtectedCount < startThreateningCount:
+                            return False, f"Step {stepNum}: Safety violation on start bank - protected group {protectedGroup} ({startProtectedCount}) outnumbered by threatening group {threateningGroup} ({startThreateningCount})"
+                        
+                        # Check if any protected species are present on target bank
+                        targetProtectedCount = sum(targetBank.get(species, 0) for species in protectedGroup)
+                        targetThreateningCount = sum(targetBank.get(species, 0) for species in threateningGroup)
+                        
+                        if targetProtectedCount > 0 and targetProtectedCount < targetThreateningCount:
+                            return False, f"Step {stepNum}: Safety violation on target bank - protected group {protectedGroup} ({targetProtectedCount}) outnumbered by threatening group {threateningGroup} ({targetThreateningCount})"
                 
                 print(f"  After step - Start: {startBank}, Target: {targetBank}")
+            
+            # Check direction alternation constraint
+            for i in range(len(solutionSteps) - 1):
+                _, currentDirection = solutionSteps[i]
+                _, nextDirection = solutionSteps[i + 1]
+                
+                if currentDirection == nextDirection:
+                    return False, f"Direction alternation violation: Steps {i + 1} and {i + 2} both go {currentDirection}. Consecutive steps cannot move in the same direction."
             
             # Check if all individuals reached target
             for species, count in parsedProblem['species'].items():
@@ -201,24 +234,26 @@ class SolutionVerifier:
     def formatSolutionAsNaturalLanguage(self, solution: List[Tuple[Dict[str, int], str]]) -> str:
         """
         Convert solution from internal format to natural language format.
-        Input: [({'species1': 2, 'species2': 1}, 'leftToRight'), ({'species3': 1}, 'rightToLeft')]
-        Output: "move 2 species1 1 species2 left -> right\nmove 1 species3 right -> left"
+        Input: [({'species1': 2, 'species2': 1}, 'leftToRight'), ({'species3': 1}, 'rightToLeft'), ({}, 'leftToRight')]
+        Output: "move 2 species1 1 species2 start -> target\nmove 1 species3 target -> start\nmove empty start -> target"
         """
         if not solution:
             return "No solution steps"
         
         solutionLines = []
         for stepNum, (moves, direction) in enumerate(solution, 1):
-            if not moves:
-                continue
-                
-            moveItems = []
-            for species, count in moves.items():
-                moveItems.append(f"{count} {species}")
+            directionText = "start -> target" if direction == 'leftToRight' else "target -> start"
             
-            moveText = " ".join(moveItems)
-            directionText = "left -> right" if direction == 'leftToRight' else "right -> left"
-            solutionLines.append(f"move {moveText} {directionText}")
+            if not moves:
+                # Empty move
+                solutionLines.append(f"move empty {directionText}")
+            else:
+                moveItems = []
+                for species, count in moves.items():
+                    moveItems.append(f"{count} {species}")
+                
+                moveText = " ".join(moveItems)
+                solutionLines.append(f"move {moveText} {directionText}")
         
         return "\n".join(solutionLines)
 

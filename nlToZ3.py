@@ -5,7 +5,7 @@ Natural Language to Z3 Constraint Converter
 
 import re
 import math
-from z3 import Int, Solver, And, Or, Not, sat
+from z3 import Int, Bool, Solver, And, Or, Not, sat
 from typing import Dict, List, Tuple, Optional
 
 
@@ -187,6 +187,38 @@ class NLToZ3Converter:
             
             # Parse constraints (e.g., "* On either bank, if vwpmy are present, they must not be outnumbered by uiatu.")
             if line.startswith('*') or 'must not be outnumbered' in line.lower():
+                # Handle group constraints like "if any of species1, species2, and species3 are present..."
+                groupConstraintMatch = re.search(r'if\s+any\s+of\s+([^,]+(?:,\s*[^,]+)*(?:,?\s*and\s+[^,]+)?)\s+are\s+present.*collectively.*outnumbered.*by\s+([^,.]+(?:,\s*[^,.]+)*(?:,?\s*and\s+[^,.]+)?)', line, re.IGNORECASE)
+                if groupConstraintMatch:
+                    # Parse the protected group
+                    protected_text = groupConstraintMatch.group(1).strip()
+                    threatening_text = groupConstraintMatch.group(2).strip()
+                    
+                    # Extract species names from the groups
+                    def extract_species_names(text):
+                        # Remove "and" and split by commas
+                        text = re.sub(r'\s+and\s+', ', ', text)
+                        species_list = [s.strip() for s in text.split(',') if s.strip()]
+                        # Clean each species name (remove any non-alphanumeric characters except underscore)
+                        cleaned_species = []
+                        for species in species_list:
+                            clean_name = re.sub(r'[^a-zA-Z_]', '', species)
+                            if clean_name:
+                                cleaned_species.append(clean_name)
+                        return cleaned_species
+                    
+                    protected_species = extract_species_names(protected_text)
+                    threatening_species = extract_species_names(threatening_text)
+                    
+                    if protected_species and threatening_species:
+                        result['constraints'].append({
+                            'type': 'group_not_outnumbered',
+                            'protected_group': protected_species,
+                            'threatening_group': threatening_species
+                        })
+                        continue
+                
+                # Handle simple binary constraints like "if vwpmy are present, they must not be outnumbered by uiatu"
                 constraintMatch = re.search(r'if\s+([a-zA-Z_]+).*outnumbered.*by\s+([a-zA-Z_]+)', line)
                 if constraintMatch:
                     protectedSpecies = constraintMatch.group(1)
@@ -279,12 +311,14 @@ class NLToZ3Converter:
             startVars = {}  # startVars[step][species]
             targetVars = {}  # targetVars[step][species]
             shuttleVars = {}  # shuttleVars[step][species]
+            directionVars = {}  # directionVars[step] - True for left->right, False for right->left
             
             for step in range(numSteps + 1):  # +1 for final state
                 startVars[step] = {}
                 targetVars[step] = {}
                 if step < numSteps:
                     shuttleVars[step] = {}
+                    directionVars[step] = Bool(f"direction_{step}")
                 
                 for species in speciesNames:
                     startVars[step][species] = Int(f"{species}_start_{step}")
@@ -307,7 +341,7 @@ class NLToZ3Converter:
                 # Shuttle capacity constraint
                 shuttleSum = sum(shuttleVars[step][species] for species in speciesNames)
                 s.add(shuttleSum <= capacity)
-                s.add(shuttleSum > 0)  # At least one individual must move
+                # Allow empty moves (shuttle can cross empty)
                 
                 # Movement constraints
                 for species in speciesNames:
@@ -332,6 +366,48 @@ class NLToZ3Converter:
                         # Safety on target bank after movement
                         s.add(Or(targetVars[step + 1][protected] == 0, 
                                 targetVars[step + 1][protected] >= targetVars[step + 1][threatening]))
+                    
+                    elif constraint['type'] == 'group_not_outnumbered':
+                        protected_group = constraint['protected_group']
+                        threatening_group = constraint['threatening_group']
+                        
+                        # Calculate totals for each group
+                        start_protected_total = sum(startVars[step + 1][species] for species in protected_group if species in startVars[step + 1])
+                        start_threatening_total = sum(startVars[step + 1][species] for species in threatening_group if species in startVars[step + 1])
+                        
+                        target_protected_total = sum(targetVars[step + 1][species] for species in protected_group if species in targetVars[step + 1])
+                        target_threatening_total = sum(targetVars[step + 1][species] for species in threatening_group if species in targetVars[step + 1])
+                        
+                        # Safety on start bank after movement
+                        s.add(Or(start_protected_total == 0, 
+                                start_protected_total >= start_threatening_total))
+                        
+                        # Safety on target bank after movement
+                        s.add(Or(target_protected_total == 0, 
+                                target_protected_total >= target_threatening_total))
+                    
+                    elif constraint['type'] == 'group_not_outnumbered':
+                        protected_group = constraint['protected_group']
+                        threatening_group = constraint['threatening_group']
+                        
+                        # Calculate totals for each group
+                        start_protected_total = sum(startVars[step + 1][species] for species in protected_group if species in startVars[step + 1])
+                        start_threatening_total = sum(startVars[step + 1][species] for species in threatening_group if species in startVars[step + 1])
+                        
+                        target_protected_total = sum(targetVars[step + 1][species] for species in protected_group if species in targetVars[step + 1])
+                        target_threatening_total = sum(targetVars[step + 1][species] for species in threatening_group if species in targetVars[step + 1])
+                        
+                        # Safety on start bank after movement
+                        s.add(Or(start_protected_total == 0, 
+                                start_protected_total >= start_threatening_total))
+                        
+                        # Safety on target bank after movement
+                        s.add(Or(target_protected_total == 0, 
+                                target_protected_total >= target_threatening_total))
+            
+            # Direction alternation constraints - no two consecutive steps in same direction
+            for step in range(numSteps - 1):
+                s.add(directionVars[step] != directionVars[step + 1])
             
             # Check if this step count can solve the problem
             if s.check() == sat:
@@ -340,14 +416,25 @@ class NLToZ3Converter:
                 
                 # Extract the solution
                 solution = []
+                solutionConstraints = []
+                
                 for step in range(numSteps):
                     stepSolution = {}
+                    
                     for species in speciesNames:
                         moves = model[shuttleVars[step][species]].as_long()
                         if moves > 0:
                             stepSolution[species] = moves
-                    if stepSolution:
-                        solution.append(stepSolution)
+                        # Create constraint for this exact move
+                        solutionConstraints.append(shuttleVars[step][species] == moves)
+                    
+                    # Include direction information
+                    direction = model.eval(directionVars[step])
+                    stepSolution['_direction'] = 'leftToRight' if str(direction) == 'True' else 'rightToLeft'
+                    solutionConstraints.append(directionVars[step] == direction)
+                    
+                    # Include all steps, even empty ones
+                    solution.append(stepSolution)
                 
                 return solution
             else:
@@ -371,12 +458,14 @@ class NLToZ3Converter:
             startVars = {}  # startVars[step][species]
             targetVars = {}  # targetVars[step][species]
             shuttleVars = {}  # shuttleVars[step][species]
+            directionVars = {}  # directionVars[step] - True for left->right, False for right->left
             
             for step in range(numSteps + 1):  # +1 for final state
                 startVars[step] = {}
                 targetVars[step] = {}
                 if step < numSteps:
                     shuttleVars[step] = {}
+                    directionVars[step] = Bool(f"direction_{step}")
                 
                 for species in speciesNames:
                     startVars[step][species] = Int(f"{species}_start_{step}")
@@ -399,7 +488,7 @@ class NLToZ3Converter:
                 # Shuttle capacity constraint
                 shuttleSum = sum(shuttleVars[step][species] for species in speciesNames)
                 s.add(shuttleSum <= capacity)
-                s.add(shuttleSum > 0)  # At least one individual must move
+                # Allow empty moves (shuttle can cross empty)
                 
                 # Movement constraints
                 for species in speciesNames:
@@ -424,6 +513,10 @@ class NLToZ3Converter:
                         # Safety on target bank after movement
                         s.add(Or(targetVars[step + 1][protected] == 0, 
                                 targetVars[step + 1][protected] >= targetVars[step + 1][threatening]))
+            
+            # Direction alternation constraints - no two consecutive steps in same direction
+            for step in range(numSteps - 1):
+                s.add(directionVars[step] != directionVars[step + 1])
             
             # Check if this step count can solve the problem
             if s.check() == sat:
@@ -449,12 +542,14 @@ class NLToZ3Converter:
             startVars = {}  # startVars[step][species]
             targetVars = {}  # targetVars[step][species]
             shuttleVars = {}  # shuttleVars[step][species]
+            directionVars = {}  # directionVars[step] - True for left->right, False for right->left
             
             for step in range(minSteps + 1):  # +1 for final state
                 startVars[step] = {}
                 targetVars[step] = {}
                 if step < minSteps:
                     shuttleVars[step] = {}
+                    directionVars[step] = Bool(f"direction_{step}")
                 
                 for species in speciesNames:
                     startVars[step][species] = Int(f"{species}_start_{step}")
@@ -477,7 +572,7 @@ class NLToZ3Converter:
                 # Shuttle capacity constraint
                 shuttleSum = sum(shuttleVars[step][species] for species in speciesNames)
                 s.add(shuttleSum <= capacity)
-                s.add(shuttleSum > 0)  # At least one individual must move
+                # Allow empty moves (shuttle can cross empty)
                 
                 # Movement constraints
                 for species in speciesNames:
@@ -503,6 +598,10 @@ class NLToZ3Converter:
                         s.add(Or(targetVars[step + 1][protected] == 0, 
                                 targetVars[step + 1][protected] >= targetVars[step + 1][threatening]))
             
+            # Direction alternation constraints - no two consecutive steps in same direction
+            for step in range(minSteps - 1):
+                s.add(directionVars[step] != directionVars[step + 1])
+            
             # Add constraints to exclude previously found solutions
             for excludeConstraint in excludeConstraints:
                 s.add(Not(excludeConstraint))
@@ -513,32 +612,33 @@ class NLToZ3Converter:
                 
                 # Extract the solution
                 solution = []
-                solutionConstraint = []
+                solutionConstraints = []
                 
                 for step in range(minSteps):
                     stepSolution = {}
-                    stepConstraints = []
                     
                     for species in speciesNames:
                         moves = model[shuttleVars[step][species]].as_long()
                         if moves > 0:
                             stepSolution[species] = moves
                         # Create constraint for this exact move
-                        stepConstraints.append(shuttleVars[step][species] == moves)
+                        solutionConstraints.append(shuttleVars[step][species] == moves)
                     
-                    if stepSolution:
-                        solution.append(stepSolution)
+                    # Include direction information
+                    direction = model.eval(directionVars[step])
+                    stepSolution['_direction'] = 'leftToRight' if str(direction) == 'True' else 'rightToLeft'
+                    solutionConstraints.append(directionVars[step] == direction)
                     
-                    # Combine all step constraints for this solution
-                    solutionConstraint.extend(stepConstraints)
+                    # Include all steps, even empty ones
+                    solution.append(stepSolution)
                 
                 # Add this solution to the list
                 allSolutions.append(solution)
                 print(f"  Found optimal solution #{len(allSolutions)}: {solution}")
                 
                 # Create exclusion constraint for this exact solution
-                if solutionConstraint:
-                    excludeConstraints.append(And(solutionConstraint))
+                if solutionConstraints:
+                    excludeConstraints.append(And(solutionConstraints))
                 
                 # Continue searching for more solutions
             else:
@@ -584,12 +684,14 @@ class NLToZ3Converter:
             "        startVars = {}",
             "        targetVars = {}",
             "        shuttleVars = {}",
+            "        directionVars = {}",
             "",
             "        for step in range(numSteps + 1):",
             "            startVars[step] = {}",
             "            targetVars[step] = {}",
             "            if step < numSteps:",
             "                shuttleVars[step] = {}",
+            "                directionVars[step] = True",
             "",
             "            for species in species:",
             "                startVars[step][species] = Int(f'{species}_start_{step}')",
@@ -612,7 +714,7 @@ class NLToZ3Converter:
             "            # Capacity constraint",
             "            shuttleSum = sum(shuttleVars[step][species] for species in species)",
             "            s.add(shuttleSum <= shuttleCapacity)",
-            "            s.add(shuttleSum > 0)",
+            "            # Allow empty moves (shuttle can cross empty)",
             "",
             "            # Movement constraints",
             "            for species in species:",
@@ -674,27 +776,35 @@ class NLToZ3Converter:
     def formatSolutionAsNaturalLanguage(self, solution: List[Dict[str, int]]) -> str:
         """
         Convert solution from internal format to natural language format.
-        Input: [{'species1': 2, 'species2': 1}, {'species3': 1}]
-        Output: "Step 1: move 2species1 1species2 left to right\nStep 2: move 1species3 left to right"
+        Input: [{'species1': 2, 'species2': 1, '_direction': 'leftToRight'}, {'species3': 1, '_direction': 'rightToLeft'}, {'_direction': 'leftToRight'}]
+        Output: "move 2 species1 1 species2 start -> target\nmove 1 species3 target -> start\nmove empty start -> target"
         """
         if not solution:
             return "No solution steps"
         
         solutionLines = []
         for stepNum, moves in enumerate(solution, 1):
-            if not moves:
-                continue
-                
-            moveItems = []
-            for species, count in moves.items():
-                moveItems.append(f"{count} {species}")
+            # Extract direction information
+            direction = moves.get('_direction', 'leftToRight')
+            directionText = "start -> target" if direction == 'leftToRight' else "target -> start"
             
-            moveText = " ".join(moveItems)
-            solutionLines.append(f"move {moveText} left -> right")
+            # Filter out the direction metadata when checking for moves
+            speciesMoves = {k: v for k, v in moves.items() if k != '_direction'}
+            
+            if not speciesMoves:
+                # Empty move
+                solutionLines.append(f"move empty {directionText}")
+            else:
+                moveItems = []
+                for species, count in speciesMoves.items():
+                    moveItems.append(f"{count} {species}")
+                
+                moveText = " ".join(moveItems)
+                solutionLines.append(f"move {moveText} {directionText}")
         
         return "\n".join(solutionLines)
     
-    def solveProblem(self, problemText: str, findAllSolutions: bool = False, showDifficulty: bool = True, maxSteps: int = 100) -> str:
+    def solveProblem(self, problemText: str, findAllSolutions: bool = False, showDifficulty: bool = True, maxSteps: int = 100, z3Only: bool = False) -> str:
         """Main method to solve the transportation problem."""
         parsedData = self.parseProblem(problemText)
         
@@ -703,6 +813,10 @@ class NLToZ3Converter:
         
         if parsedData['shuttle_capacity'] == 0:
             return "Error: No shuttle capacity found in the problem description."
+        
+        # Skip all verbose output if z3Only is True
+        if z3Only:
+            return self.generateZ3CodeTemplate(parsedData)
         
         print("Parsed problem:")
         print(f"  Shuttle capacity: {parsedData['shuttle_capacity']}")
@@ -766,7 +880,19 @@ def main():
     """Main function to demonstrate the multi-step converter."""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Natural Language to Z3 Transportation Problem Solver")
+    parser = argparse.ArgumentParser(
+        description="Natural Language to Z3 Transportation Problem Solver",
+        epilog="""
+Examples:
+  python nlToZ3.py                                              # Run built-in test problems
+  python nlToZ3.py --z3-only                                   # Output only Z3 code for test problems
+  python nlToZ3.py --file problem1.txt --z3-only              # Generate Z3 code from file
+  python nlToZ3.py --problem "A shuttle..." --z3-only         # Generate Z3 code from command line
+  python nlToZ3.py --file problem.txt --analyze-difficulty    # Analyze problem difficulty only
+  echo "problem text" | python nlToZ3.py --stdin --z3-only    # Read from stdin and output Z3 code
+        """,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument('--all-solutions', action='store_true', 
                        help='Find all optimal solutions (minimum steps) instead of just the first one')
     parser.add_argument('--problem', type=str, 
@@ -777,10 +903,34 @@ def main():
                        help='Skip difficulty analysis during problem solving')
     parser.add_argument('--max-steps', type=int, default=100,
                        help='Maximum number of steps to try when solving (default: 100)')
+    parser.add_argument('--z3-only', action='store_true',
+                       help='Output only the Z3 code without solving or analysis')
+    parser.add_argument('--file', type=str,
+                       help='Read problem from file instead of using built-in tests')
+    parser.add_argument('--stdin', action='store_true',
+                       help='Read problem from stdin')
     
     args = parser.parse_args()
     
     converter = NLToZ3Converter()
+    
+    # Handle file or stdin input
+    if args.file:
+        try:
+            with open(args.file, 'r') as f:
+                problemText = f.read().strip()
+            args.problem = problemText
+        except FileNotFoundError:
+            print(f"Error: File '{args.file}' not found.")
+            return
+        except Exception as e:
+            print(f"Error reading file '{args.file}': {e}")
+            return
+    
+    if args.stdin:
+        import sys
+        problemText = sys.stdin.read().strip()
+        args.problem = problemText
     
     if args.problem:
         # Handle custom problem
@@ -792,6 +942,11 @@ def main():
             print(args.problem)
             print()
             converter.printDifficultyAnalysis(args.problem)
+            return
+        elif args.z3_only:
+            # Output only Z3 code
+            z3Code = converter.solveProblem(args.problem, z3Only=True)
+            print(z3Code)
             return
         else:
             # Solve custom problem
@@ -845,21 +1000,28 @@ def main():
     ]
     
     for test in testProblems:
-        print("=" * 80)
-        print(f"TEST: {test['name']}")
-        print("=" * 80)
-        print("PROBLEM:")
-        print(test['problem'])
-        print("\nSOLVING...")
-        print("-" * 50)
-        
-        z3Code = converter.solveProblem(test['problem'], 
-                                       findAllSolutions=args.all_solutions,
-                                       showDifficulty=not args.no_difficulty,
-                                       maxSteps=args.max_steps)
-        
-        print("\n" + "=" * 80)
-        print()
+        if args.z3_only:
+            # Output only Z3 code for each test problem
+            print(f"# {test['name']}")
+            z3Code = converter.solveProblem(test['problem'], z3Only=True)
+            print(z3Code)
+            print()
+        else:
+            print("=" * 80)
+            print(f"TEST: {test['name']}")
+            print("=" * 80)
+            print("PROBLEM:")
+            print(test['problem'])
+            print("\nSOLVING...")
+            print("-" * 50)
+            
+            z3Code = converter.solveProblem(test['problem'], 
+                                           findAllSolutions=args.all_solutions,
+                                           showDifficulty=not args.no_difficulty,
+                                           maxSteps=args.max_steps)
+            
+            print("\n" + "=" * 80)
+            print()
 
 
 if __name__ == "__main__":
